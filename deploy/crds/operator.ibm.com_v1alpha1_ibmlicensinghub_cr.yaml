@@ -1,0 +1,7 @@
+apiVersion: operator.ibm.com/v1alpha1
+kind: IBMLicensingHub
+metadata:
+  name: example-ibmlicensinghub
+spec:
+  # Add fields here
+  size: 3
