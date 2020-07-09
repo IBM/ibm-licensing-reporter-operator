@@ -22,11 +22,11 @@ BUILD_LOCALLY ?= 1
 # Use your own docker registry and image name for dev/test by overriding the IMG, REGISTRY and CSV_VERSION environment variable.
 IMG ?= ibm-licensing-hub-operator
 REGISTRY ?= quay.io/opencloudio
-CSV_VERSION ?= 1.0.0
+CSV_VERSION ?= 1.2.0
 
 # Set the registry and tag for the operand images
 OPERAND_REGISTRY ?= $(REGISTRY)
-OPERAND_TAG ?= 1.0.0
+OPERAND_TAG ?= 1.2.0
 
 # When pushing CSV locally you need to have these credentials set as environment variables.
 QUAY_USERNAME ?=
@@ -216,7 +216,7 @@ push-image: $(CONFIG_DOCKER_TARGET) build-image
 .PHONY: get-image-sha
 get-image-sha: ## replaces operand tag for digest in operator.yaml and csv
 	@echo Get SHA for Operan
-	# @common/scripts/get-image-sha.sh $(OPERAND_REGISTRY)/ibm-licensing-hub $(OPERAND_TAG)
+	@common/scripts/get-image-sha.sh $(OPERAND_REGISTRY)/ibm-licensing-hub $(OPERAND_TAG)
 
 ##@ Release
 

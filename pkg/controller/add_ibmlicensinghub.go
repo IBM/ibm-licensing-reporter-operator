@@ -14,8 +14,13 @@
 // limitations under the License.
 //
 
-package version
+package controller
 
-var (
-	Version = "1.2.0"
+import (
+	"github.com/ibm/ibm-licensing-hub-operator/pkg/controller/ibmlicensinghub"
 )
+
+func init() {
+	// AddToManagerFuncs is a list of functions to create controllers and add them to a manager.
+	AddToManagerFuncs = append(AddToManagerFuncs, ibmlicensinghub.Add)
+}
