@@ -275,11 +275,11 @@ create_subscription(){
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
 metadata:
-  name: ibm-licensing-operator-app
+  name: ibm-licensing-hub-operator-app
   namespace: $INSTALL_NAMESPACE
 spec:
   channel: stable-v1
-  name: ibm-licensing-operator-app
+  name: ibm-licensing-hub-operator-app
   source: opencloud-operators
   sourceNamespace: $olm_global_catalog_namespace
 EOF
@@ -290,7 +290,7 @@ EOF
 }
 
 handle_subscription(){
-  if ! verbose_output_command kubectl get sub ibm-licensing-operator-app -n "${INSTALL_NAMESPACE}"; then
+  if ! verbose_output_command kubectl get sub ibm-licensing-hub-operator-app -n "${INSTALL_NAMESPACE}"; then
     create_subscription
   else
     verbose_output_command echo "Subscription already exists"
@@ -299,13 +299,13 @@ handle_subscription(){
   retries=55
   no_csv_name_in_sub_count=0
   until [[ $retries == 0 || $new_csv_phase == "Succeeded" ]]; do
-    csv_name=$(kubectl get sub -n "${INSTALL_NAMESPACE}" ibm-licensing-operator-app -o jsonpath='{.status.currentCSV}')
+    csv_name=$(kubectl get sub -n "${INSTALL_NAMESPACE}" ibm-licensing-hub-operator-app -o jsonpath='{.status.currentCSV}')
     if [[ "$csv_name" == "" ]]; then
       no_csv_name_in_sub_count=$((no_csv_name_in_sub_count + 1))
       if [ $no_csv_name_in_sub_count -gt 9 ]; then
         no_csv_name_in_sub_count=0
         verbose_output_command "No CSV name in Subscription, deleting Subscription and creating it again"
-        kubectl delete sub ibm-licensing-operator-app -n "${INSTALL_NAMESPACE}"
+        kubectl delete sub ibm-licensing-hub-operator-app -n "${INSTALL_NAMESPACE}"
         sleep 5
         create_subscription
       fi
@@ -333,32 +333,31 @@ handle_subscription(){
 }
 
 handle_instance(){
-  if ! verbose_output_command kubectl get IBMLicensing instance; then
+  if ! verbose_output_command kubectl get IBMLicensingHub instance; then
     if ! cat <<EOF | kubectl apply -f -
 apiVersion: operator.ibm.com/v1alpha1
-kind: IBMLicensing
+kind: IBMLicensingHub
 metadata:
   name: instance
 spec:
-  apiSecretToken: ibm-licensing-token
-  datasource: datacollector
+  apiSecretToken: ibm-licensing-hub-token
   httpsEnable: true
   instanceNamespace: $INSTALL_NAMESPACE
 EOF
     then
-      echo "Error: Failed to apply IBMLicensing instance at namespace $INSTALL_NAMESPACE"
+      echo "Error: Failed to apply IBMLicensingHub instance at namespace $INSTALL_NAMESPACE"
       exit 19
     fi
   else
-    verbose_output_command echo "IBMLicensing instance already exists"
+    verbose_output_command echo "IBMLicensingHub instance already exists"
   fi
-  echo "Checking IBMLicensing instance status"
+  echo "Checking IBMLicensingHub instance status"
   retries=50
   until [[ $retries == 0 || $new_ibmlicensing_phase == "Running" ]]; do
-    new_ibmlicensing_phase=$(kubectl get IBMLicensing instance -o jsonpath='{.status..phase}' 2>/dev/null || echo "Waiting for IBMLicensing pod to appear")
+    new_ibmlicensing_phase=$(kubectl get IBMLicensingHub instance -o jsonpath='{.status..phase}' 2>/dev/null || echo "Waiting for IBMLicensingHub pod to appear")
     if [[ $new_ibmlicensing_phase != "$ibmlicensing_phase" ]]; then
       ibmlicensing_phase=$new_ibmlicensing_phase
-      echo "IBMLicensing Pod phase: $ibmlicensing_phase"
+      echo "IBMLicensingHub Pod phase: $ibmlicensing_phase"
       if [ "$ibmlicensing_phase" == "Failed" ] ; then
         echo "Error: Problem during installation of IBMLicensing, try running script again when fixed, check README for post installation section and troubleshooting"
         exit 20
@@ -368,7 +367,7 @@ EOF
     retries=$((retries - 1))
   done
   if [ $retries == 0 ]; then
-    echo "Error: IBMLicensing instance pod failed to reach phase Running"
+    echo "Error: IBMLicensingHub instance pod failed to reach phase Running"
     exit 21
   fi
   echo "IBM License Service should be running, you can check post installation section in README to see possible configurations of IBM Licensing instance, and how to configure ingress/route if needed"
@@ -435,4 +434,4 @@ install_marketplace
 handle_operator_source
 handle_operator_group
 handle_subscription
-handle_instance
+#handle_instance
