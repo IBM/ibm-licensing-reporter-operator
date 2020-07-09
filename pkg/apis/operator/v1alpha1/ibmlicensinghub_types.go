@@ -31,7 +31,6 @@ type IBMLicensingHubSpec struct {
 
 	// Storage class used by database to provide persistency
 	StorageClass string `json:"storageClass,omitempty"`
-
 }
 
 // IBMLicensingHubStatus defines the observed state of IBMLicensingHub
