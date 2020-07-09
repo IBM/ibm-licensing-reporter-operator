@@ -27,7 +27,7 @@ if [[ $VERSION == "" ]]
 then
    echo "Missing parm. Need image type, image name and image tag"
    echo "Example:"
-   echo "   quay.io/opencloudio/ibm-licensing 1.1.0"
+   echo "   quay.io/opencloudio/ibm-licensing-hub 1.2.0"
    exit 1
 fi
 
@@ -57,7 +57,7 @@ OPER_FILE=deploy/operator.yaml
 # delete the "name" and "value" lines for the old SHA
 # for example:
 #     - name: OPERAND_LICENSING_IMAGE
-#       value: quay.io/opencloudio/ibm-licensing@sha256:10a844ffaf7733176e927e6c4faa04c2bc4410cf4d4ef61b9ae5240aa62d1456
+#       value: quay.io/opencloudio/ibm-licensing-hub@sha256:10a844ffaf7733176e927e6c4faa04c2bc4410cf4d4ef61b9ae5240aa62d1456
 
 sed -i "/name: OPERAND_LICENSING_IMAGE/{N;d;}" $OPER_FILE
 
@@ -69,12 +69,12 @@ sed -i "/env:/a $LINE1\n$LINE2" $OPER_FILE
 #---------------------------------------------------------
 # update the CSV
 #---------------------------------------------------------
-CSV_FILE=deploy/olm-catalog/ibm-licensing-operator/"${VERSION}"/ibm-licensing-operator.v"${VERSION}".clusterserviceversion.yaml
+CSV_FILE=deploy/olm-catalog/ibm-licensing-hub-operator/"${VERSION}"/ibm-licensing-hub-operator.v"${VERSION}".clusterserviceversion.yaml
 
 # delete the "name" and "value" lines for the old SHA
 # for example:
 #     - name: OPERAND_LICENSING_IMAGE
-#       value: quay.io/opencloudio/ibm-licensing@sha256:10a844ffaf7733176e927e6c4faa04c2bc4410cf4d4ef61b9ae5240aa62d1456
+#       value: quay.io/opencloudio/ibm-licensing-hub@sha256:10a844ffaf7733176e927e6c4faa04c2bc4410cf4d4ef61b9ae5240aa62d1456
 
 sed -i "/name: OPERAND_LICENSING_IMAGE/{N;d;}" "${CSV_FILE}"
 
