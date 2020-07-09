@@ -109,7 +109,7 @@ func main() {
 		os.Exit(1)
 	}
 
-    // Reconcile duration, we does not watch lots of resources, instead we reconcile in each minutes
+	// Reconcile duration, we does not watch lots of resources, instead we reconcile in each minutes
 	reconcileDuration := 30 * time.Minute
 
 	// Set default manager options
