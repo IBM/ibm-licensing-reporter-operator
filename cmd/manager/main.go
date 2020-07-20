@@ -34,6 +34,7 @@ import (
 	"github.com/ibm/ibm-licensing-hub-operator/pkg/controller"
 	"github.com/ibm/ibm-licensing-hub-operator/version"
 
+	routev1 "github.com/openshift/api/route/v1"
 	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
 	kubemetrics "github.com/operator-framework/operator-sdk/pkg/kube-metrics"
 	"github.com/operator-framework/operator-sdk/pkg/leader"
@@ -110,7 +111,7 @@ func main() {
 	}
 
 	// Reconcile duration, we does not watch lots of resources, instead we reconcile in each minutes
-	reconcileDuration := 30 * time.Minute
+	reconcileDuration := 5 * time.Minute
 
 	// Set default manager options
 	options := manager.Options{
@@ -139,6 +140,12 @@ func main() {
 
 	// Setup Scheme for all resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
+		log.Error(err, "")
+		os.Exit(1)
+	}
+
+	// Add Route resource for OpenShift clusters
+	if err := routev1.Install(mgr.GetScheme()); err != nil {
 		log.Error(err, "")
 		os.Exit(1)
 	}

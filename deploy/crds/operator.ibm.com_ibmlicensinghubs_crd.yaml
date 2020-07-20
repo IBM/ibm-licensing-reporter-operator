@@ -35,9 +35,155 @@ spec:
               description: Secret name used to store application token, either one
                 that exists, or one that will be created
               type: string
+            capacity:
+              description: Persistent Volume Claim Capacity
+              type: string
+            databaseContainer:
+              description: Database Settings
+              properties:
+                image:
+                  description: Docker Image
+                  type: string
+                resources:
+                  description: Resources and limits for container
+                  properties:
+                    limits:
+                      additionalProperties:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      description: 'Limits describes the maximum amount of compute
+                        resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/'
+                      type: object
+                    requests:
+                      additionalProperties:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      description: 'Requests describes the minimum amount of compute
+                        resources required. If Requests is omitted for a container,
+                        it defaults to Limits if that is explicitly specified, otherwise
+                        to an implementation-defined value. More info: https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/'
+                      type: object
+                  type: object
+              type: object
+            httpsCertsSource:
+              description: 'options: self-signed or custom'
+              enum:
+              - self-signed
+              - custom
+              type: string
+            imagePullPolicy:
+              description: 'IBM License Service Hub Pod pull policy, default: IfNotPresent'
+              enum:
+              - Always
+              - IfNotPresent
+              - Never
+              type: string
+            imagePullSecrets:
+              description: Array of pull secrets which should include existing at
+                InstanceNamespace secret to allow pulling IBM Licensing Hub images
+              items:
+                type: string
+              type: array
+            license:
+              description: Opt-in license acceptance is required to create resources
+              properties:
+                accept:
+                  description: Accept is an opt-in license acceptance required to
+                    deploy resources
+                  type: boolean
+              required:
+              - accept
+              type: object
+            receiverContainer:
+              description: Receiver Settings
+              properties:
+                image:
+                  description: Docker Image
+                  type: string
+                resources:
+                  description: Resources and limits for container
+                  properties:
+                    limits:
+                      additionalProperties:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      description: 'Limits describes the maximum amount of compute
+                        resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/'
+                      type: object
+                    requests:
+                      additionalProperties:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      description: 'Requests describes the minimum amount of compute
+                        resources required. If Requests is omitted for a container,
+                        it defaults to Limits if that is explicitly specified, otherwise
+                        to an implementation-defined value. More info: https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/'
+                      type: object
+                  type: object
+              type: object
+            routeOptions:
+              description: Route parameters
+              properties:
+                tls:
+                  description: TLSConfig defines config used to secure a route and
+                    provide termination
+                  properties:
+                    caCertificate:
+                      description: caCertificate provides the cert authority certificate
+                        contents
+                      type: string
+                    certificate:
+                      description: certificate provides certificate contents
+                      type: string
+                    destinationCACertificate:
+                      description: destinationCACertificate provides the contents
+                        of the ca certificate of the final destination.  When using
+                        reencrypt termination this file should be provided in order
+                        to have routers use it for health checks on the secure connection.
+                        If this field is not specified, the router may provide its
+                        own destination CA and perform hostname validation using the
+                        short service name (service.namespace.svc), which allows infrastructure
+                        generated certificates to automatically verify.
+                      type: string
+                    insecureEdgeTerminationPolicy:
+                      description: "insecureEdgeTerminationPolicy indicates the desired
+                        behavior for insecure connections to a route. While each router
+                        may make its own decisions on which ports to expose, this
+                        is normally port 80. \n * Allow - traffic is sent to the server
+                        on the insecure port (default) * Disable - no traffic is allowed
+                        on the insecure port. * Redirect - clients are redirected
+                        to the secure port."
+                      type: string
+                    key:
+                      description: key provides key file contents
+                      type: string
+                    termination:
+                      description: termination indicates termination type.
+                      type: string
+                  required:
+                  - termination
+                  type: object
+              type: object
             storageClass:
               description: Storage class used by database to provide persistency
               type: string
+            version:
+              description: Version
+              type: string
+          required:
+          - license
           type: object
         status:
           description: IBMLicensingHubStatus defines the observed state of IBMLicensingHub

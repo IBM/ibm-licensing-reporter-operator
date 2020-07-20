@@ -25,6 +25,12 @@ spec:
     - description: IBMLicensingHub is the Schema for the ibmlicensinghubs API
       kind: IBMLicensingHub
       name: ibmlicensinghubs.operator.ibm.com
+      specDescriptors:
+      - description: Accept is an opt-in license acceptance required to deploy resources
+        displayName: License Acceptance
+        path: license.accept
+        x-descriptors:
+        - urn:alm:descriptor:com.tectonic.ui:booleanSwitch
       version: v1alpha1
   displayName: Ibm Licensing Hub Operator
   icon:
