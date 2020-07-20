@@ -44,9 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-var (
-	log = logf.Log.WithName("controller_ibmlicensinghub")
-)
+var log = logf.Log.WithName("controller_ibmlicensinghub")
 
 /**
 * USER ACTION REQUIRED: This is a scaffold file intended for the user to modify with their own Controller

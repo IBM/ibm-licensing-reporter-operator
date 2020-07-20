@@ -111,7 +111,7 @@ func main() {
 	}
 
 	// Reconcile duration, we does not watch lots of resources, instead we reconcile in each minutes
-	reconcileDuration := 5 * time.Minute
+	reconcileDuration := 30 * time.Minute
 
 	// Set default manager options
 	options := manager.Options{
