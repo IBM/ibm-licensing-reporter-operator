@@ -18,9 +18,18 @@ package ibmlicensinghub
 
 import (
 	"context"
+	"fmt"
+	"reflect"
+	"time"
 
+	"github.com/go-logr/logr"
 	operatorv1alpha1 "github.com/ibm/ibm-licensing-hub-operator/pkg/apis/operator/v1alpha1"
+	res "github.com/ibm/ibm-licensing-hub-operator/pkg/resources"
+	routev1 "github.com/openshift/api/route/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -50,7 +59,7 @@ func Add(mgr manager.Manager) error {
 
 // newReconciler returns a new reconcile.Reconciler
 func newReconciler(mgr manager.Manager) reconcile.Reconciler {
-	return &ReconcileIBMLicensingHub{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+	return &ReconcileIBMLicensingHub{client: mgr.GetClient(), reader: mgr.GetAPIReader(), scheme: mgr.GetScheme()}
 }
 
 // add adds a new Controller to mgr with r as the reconcile.Reconciler
@@ -87,8 +96,16 @@ type ReconcileIBMLicensingHub struct {
 	// This client, initialized using mgr.Client() above, is a split client
 	// that reads objects from the cache and writes to the apiserver
 	client client.Client
+	reader client.Reader
 	scheme *runtime.Scheme
 }
+
+type ResourceObject interface {
+	metav1.Object
+	runtime.Object
+}
+
+type reconcileFunctionType = func(*operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error)
 
 // Reconcile reads that state of the cluster for a IBMLicensingHub object and makes changes based on the state read
 // and what is in the IBMLicensingHub.Spec
@@ -97,71 +114,378 @@ type ReconcileIBMLicensingHub struct {
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileIBMLicensingHub) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	reqLogger := log.WithValues("Request", request)
 	reqLogger.Info("Reconciling IBMLicensingHub")
 
+	var recResult reconcile.Result
+	var recErr error
+
+	reconcileFunctions := []interface{}{
+		r.reconcileServiceAccount,
+		r.reconcileRole,
+		r.reconcileRoleBinding,
+		r.reconcileAPISecretToken,
+		r.reconcileDatabaseSecret,
+		r.reconcilePersistentVolumeClaim,
+		r.reconcileDeployment,
+		r.reconcileService,
+		r.reconcileRoute,
+	}
+
 	// Fetch the IBMLicensingHub instance
-	instance := &operatorv1alpha1.IBMLicensingHub{}
-	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
+	foundInstance := &operatorv1alpha1.IBMLicensingHub{}
+	err := r.client.Get(context.TODO(), request.NamespacedName, foundInstance)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
 			// Return and don't requeue
+			// reqLogger.Info("IBMLicensingHub resource not found. Ignoring since object must be deleted")
 			return reconcile.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
+		// reqLogger.Error(err, "Failed to get IBMLicensingHub" )
 		return reconcile.Result{}, err
 	}
 
-	// Define a new Pod object
-	pod := newPodForCR(instance)
+	instance := foundInstance.DeepCopy()
+	reqLogger.Info("got IBM License Service Hub application, version=" + instance.Spec.Version)
 
-	// Set IBMLicensingHub instance as the owner and controller
-	if err := controllerutil.SetControllerReference(instance, pod, r.scheme); err != nil {
-		return reconcile.Result{}, err
-	}
-
-	// Check if this Pod already exists
-	found := &corev1.Pod{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, found)
-	if err != nil && errors.IsNotFound(err) {
-		reqLogger.Info("Creating a new Pod", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
-		err = r.client.Create(context.TODO(), pod)
+	setDefaults(instance)
+	if instance.Spec.StorageClass == "" {
+		storageClass, err := r.getStorageClass()
 		if err != nil {
 			return reconcile.Result{}, err
 		}
+		instance.Spec.StorageClass = storageClass
+	}
 
-		// Pod created successfully - don't requeue
+	// Validate that the license has been accepted
+	licenseAccept := foundInstance.Spec.License.Accept
+	if !licenseAccept {
+		reqLogger.Info("User must accept the license terms using spec.license.accept")
+		// License terms have not been accepted.
+		// Return and don't requeue
 		return reconcile.Result{}, nil
-	} else if err != nil {
+	}
+
+	// Start Reconcile
+	for _, reconcileFunction := range reconcileFunctions {
+		recResult, recErr = reconcileFunction.(reconcileFunctionType)(instance)
+		if recErr != nil || recResult.Requeue {
+			return recResult, recErr
+		}
+	}
+
+	// Update status logic, using foundInstance, because we do not want to add filled default values to yaml
+	return r.updateStatus(foundInstance, reqLogger)
+}
+
+func (r *ReconcileIBMLicensingHub) updateStatus(instance *operatorv1alpha1.IBMLicensingHub, reqLogger logr.Logger) (reconcile.Result, error) {
+	podList := &corev1.PodList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(instance.GetNamespace()),
+		client.MatchingLabels(res.LabelsForLicensingHubPod(instance)),
+	}
+	if err := r.client.List(context.TODO(), podList, listOpts...); err != nil {
+		reqLogger.Error(err, "Failed to list pods")
 		return reconcile.Result{}, err
 	}
 
-	// Pod already exists - don't requeue
-	reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
+	var podStatuses []corev1.PodStatus
+	for _, pod := range podList.Items {
+		if pod.Status.Conditions != nil {
+			i := 0
+			for _, podCondition := range pod.Status.Conditions {
+				if (podCondition.LastProbeTime == metav1.Time{Time: time.Time{}}) {
+					// Time{} is treated as null and causes error at status update so value need to be changed to some other default empty value
+					pod.Status.Conditions[i].LastProbeTime = metav1.Time{
+						Time: time.Unix(0, 1),
+					}
+				}
+				i++
+			}
+		}
+		podStatuses = append(podStatuses, pod.Status)
+	}
+
+	if !reflect.DeepEqual(podStatuses, instance.Status.LicensingHubPods) {
+		reqLogger.Info("Updating IBMLicensingHub status", "Instance", instance)
+		instance.Status.LicensingHubPods = podStatuses
+		err := r.client.Status().Update(context.TODO(), instance)
+		if err != nil {
+			reqLogger.Info("Failed to update pod status")
+		}
+	}
+
+	reqLogger.Info("reconcile all done")
 	return reconcile.Result{}, nil
 }
 
-// newPodForCR returns a busybox pod with the same name/namespace as the cr
-func newPodForCR(cr *operatorv1alpha1.IBMLicensingHub) *corev1.Pod {
-	labels := map[string]string{
-		"app": cr.Name,
+func (r *ReconcileIBMLicensingHub) reconcileServiceAccount(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+	reqLogger := log.WithValues("reconcileServiceAccount", "Entry", "instance.GetName()", instance.GetName())
+	expectedSA := res.GetLicensingServiceAccount(instance)
+	foundSA := &corev1.ServiceAccount{}
+	reconcileResult, err := r.reconcileResourceExistence(instance, expectedSA, foundSA)
+	if err != nil || reconcileResult.Requeue {
+		return reconcileResult, err
 	}
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      cr.Name + "-pod",
-			Namespace: cr.Namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:    "busybox",
-					Image:   "busybox",
-					Command: []string{"sleep", "3600"},
-				},
-			},
-		},
+	// Check if found SA has all necessary Pull Secrets
+	shouldUpdate := false
+	for _, imagePullSecret := range expectedSA.ImagePullSecrets {
+		if !res.Contains(foundSA.ImagePullSecrets, imagePullSecret) {
+			foundSA.ImagePullSecrets = append(foundSA.ImagePullSecrets, imagePullSecret)
+			shouldUpdate = true
+		}
+	}
+	if shouldUpdate {
+		reqLogger.Info("Updating ServiceAccount", "Updated ServiceAccount", foundSA)
+		err = r.client.Update(context.TODO(), foundSA)
+		if err != nil {
+			reqLogger.Error(err, "Failed to update ServiceAccount, deleting...")
+			err = r.client.Delete(context.TODO(), foundSA)
+			if err != nil {
+				reqLogger.Error(err, "Failed to delete ServiceAccount during recreation")
+				return reconcile.Result{}, err
+			}
+			reqLogger.Info("Deleted ServiceAccount successfully")
+			return reconcile.Result{Requeue: true}, nil
+		}
+		reqLogger.Info("Updated ServiceAccount successfully")
+		// Spec updated - return and do not requeue as it might not consider extra values
+		return reconcile.Result{}, nil
+	}
+	return reconcile.Result{}, nil
+}
+
+func (r *ReconcileIBMLicensingHub) reconcileRole(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+	expectedRole := res.GetLicensingRole(instance)
+	foundRole := &rbacv1.Role{}
+	return r.reconcileResourceExistence(instance, expectedRole, foundRole)
+}
+
+func (r *ReconcileIBMLicensingHub) reconcileRoleBinding(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+	expectedRoleBinding := res.GetLicensingRoleBinding(instance)
+	foundRoleBinding := &rbacv1.RoleBinding{}
+	return r.reconcileResourceExistence(instance, expectedRoleBinding, foundRoleBinding)
+}
+
+func (r *ReconcileIBMLicensingHub) reconcilePersistentVolumeClaim(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+
+	expectedDeployment := res.GetPersistenceVolumeClaim(instance)
+	foundDeployment := &corev1.PersistentVolumeClaim{}
+
+	reconcileResult, err := r.reconcileResourceExistence(instance, expectedDeployment, foundDeployment)
+	if err != nil || reconcileResult.Requeue {
+		return reconcileResult, err
+	}
+	return reconcile.Result{}, nil
+
+}
+
+func (r *ReconcileIBMLicensingHub) reconcileDatabaseSecret(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+	expectedSecret := res.GetDatabaseSecret(instance)
+	foundSecret := &corev1.Secret{}
+	return r.reconcileResourceExistence(instance, expectedSecret, foundSecret)
+}
+
+func (r *ReconcileIBMLicensingHub) reconcileAPISecretToken(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+	expectedSecret := res.GetAPISecretToken(instance)
+	foundSecret := &corev1.Secret{}
+	return r.reconcileResourceExistence(instance, expectedSecret, foundSecret)
+}
+
+func (r *ReconcileIBMLicensingHub) reconcileService(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+	expectedService := res.GetReceiverService(instance)
+	foundService := &corev1.Service{}
+	return r.reconcileResourceExistence(instance, expectedService, foundService)
+}
+
+func (r *ReconcileIBMLicensingHub) reconcileDeployment(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+	reqLogger := log.WithValues("reconcileDeployment", "Entry", "instance.GetName()", instance.GetName())
+	expectedDeployment := res.GetLicensingDeployment(instance)
+	shouldUpdate := true
+	foundDeployment := &appsv1.Deployment{}
+	reconcileResult, err := r.reconcileResourceExistence(instance, expectedDeployment, foundDeployment)
+	if err != nil || reconcileResult.Requeue {
+		return reconcileResult, err
+	}
+
+	// TODO: this should be refactored in some nice way where you only declare which parameters needs to be correct between resources
+	foundSpec := foundDeployment.Spec.Template.Spec
+	expectedSpec := expectedDeployment.Spec.Template.Spec
+	if !reflect.DeepEqual(foundSpec.Volumes, expectedSpec.Volumes) {
+		reqLogger.Info("Deployment has wrong volumes")
+	} else if foundSpec.ServiceAccountName != expectedSpec.ServiceAccountName {
+		reqLogger.Info("Deployment wrong service account name")
+	} else if len(foundSpec.Containers) != len(expectedSpec.Containers) {
+		reqLogger.Info("Deployment has wrong number of containers")
+	} else if len(foundSpec.InitContainers) != len(expectedSpec.InitContainers) {
+		reqLogger.Info("Deployment has wrong number of init containers")
+	} else if !reflect.DeepEqual(foundDeployment.Spec.Template.Annotations, expectedDeployment.Spec.Template.Annotations) {
+		reqLogger.Info("Deployment has wrong spec template annotations")
+	} else {
+		shouldUpdate = false
+		containersToBeChecked := map[*corev1.Container]corev1.Container{&foundSpec.Containers[0]: expectedSpec.Containers[0]}
+		for foundContainer, expectedContainer := range containersToBeChecked {
+			if shouldUpdate {
+				break
+			}
+			shouldUpdate = true
+			if foundContainer.Name != expectedContainer.Name {
+				reqLogger.Info("Deployment wrong container name")
+			} else if foundContainer.Image != expectedContainer.Image {
+				reqLogger.Info("Deployment wrong container image")
+			} else if foundContainer.ImagePullPolicy != expectedContainer.ImagePullPolicy {
+				reqLogger.Info("Deployment wrong image pull policy")
+			} else if !reflect.DeepEqual(foundContainer.Command, expectedContainer.Command) {
+				reqLogger.Info("Deployment wrong container command")
+			} else if !reflect.DeepEqual(foundContainer.Ports, expectedContainer.Ports) {
+				reqLogger.Info("Deployment wrong containers ports")
+			} else if !reflect.DeepEqual(foundContainer.VolumeMounts, expectedContainer.VolumeMounts) {
+				reqLogger.Info("Deployment wrong VolumeMounts in container")
+			} else if !reflect.DeepEqual(foundContainer.Env, expectedContainer.Env) {
+				reqLogger.Info("Deployment wrong env variables in container")
+			} else if !reflect.DeepEqual(foundContainer.SecurityContext, expectedContainer.SecurityContext) {
+				reqLogger.Info("Deployment wrong container security context")
+			} else if (foundContainer.Resources.Limits == nil) || (foundContainer.Resources.Requests == nil) {
+				reqLogger.Info("Deployment wrong container Resources")
+			} else if !(foundContainer.Resources.Limits.Cpu().Equal(*expectedContainer.Resources.Limits.Cpu()) &&
+				foundContainer.Resources.Limits.Memory().Equal(*expectedContainer.Resources.Limits.Memory())) {
+				reqLogger.Info("Deployment wrong container Resources Limits")
+			} else if !(foundContainer.Resources.Requests.Cpu().Equal(*expectedContainer.Resources.Requests.Cpu()) &&
+				foundContainer.Resources.Requests.Memory().Equal(*expectedContainer.Resources.Requests.Memory())) {
+				reqLogger.Info("Deployment wrong container Resources Requests")
+			} else {
+				shouldUpdate = false
+			}
+		}
+	}
+
+	if shouldUpdate {
+		refreshedDeployment := foundDeployment.DeepCopy()
+		refreshedDeployment.Spec.Template.Spec.Volumes = expectedDeployment.Spec.Template.Spec.Volumes
+		refreshedDeployment.Spec.Template.Spec.Containers = expectedDeployment.Spec.Template.Spec.Containers
+		refreshedDeployment.Spec.Template.Spec.InitContainers = expectedDeployment.Spec.Template.Spec.InitContainers
+		refreshedDeployment.Spec.Template.Spec.ServiceAccountName = expectedDeployment.Spec.Template.Spec.ServiceAccountName
+		refreshedDeployment.Spec.Template.Annotations = expectedDeployment.Spec.Template.Annotations
+		reqLogger.Info("Updating Deployment Spec to", "RefreshedDeployment.Spec", refreshedDeployment.Spec)
+		err = r.client.Update(context.TODO(), refreshedDeployment)
+		if err != nil {
+			// only need to delete deployment as new will be recreated on next reconciliation
+			reqLogger.Error(err, "Failed to update Deployment, deleting...", "Namespace", foundDeployment.Namespace, "Name", foundDeployment.Name)
+			err = r.client.Delete(context.TODO(), foundDeployment)
+			if err != nil {
+				reqLogger.Error(err, "Failed to delete Deployment during recreation", "Namespace", foundDeployment.Namespace, "Name", foundDeployment.Name)
+				return reconcile.Result{}, err
+			}
+			// Deployment deleted successfully - return and requeue to create new one
+			reqLogger.Info("Deleted deployment successfully", "Deployment.Namespace", foundDeployment.Namespace, "Deployment.Name", foundDeployment.Name)
+			return reconcile.Result{Requeue: true}, nil
+		}
+		reqLogger.Info("Updated deployment successfully", "Deployment.Namespace", refreshedDeployment.Namespace, "Deployment.Name", refreshedDeployment.Name)
+		// Spec updated - return and do not requeue as it might not consider extra values
+		return reconcile.Result{}, nil
+	}
+
+	return reconcile.Result{}, nil
+}
+
+func (r *ReconcileIBMLicensingHub) reconcileRoute(instance *operatorv1alpha1.IBMLicensingHub) (reconcile.Result, error) {
+	expectedRoute := res.GetLicensingRoute(instance)
+	foundRoute := &routev1.Route{}
+	return r.reconcileResourceExistence(instance, expectedRoute, foundRoute)
+}
+
+func (r *ReconcileIBMLicensingHub) getStorageClass() (string, error) {
+	var defaultSC []string
+	var nonDefaultSC []string
+
+	scList := &storagev1.StorageClassList{}
+	log.Info("Reconcile storageClass")
+	err := r.reader.List(context.TODO(), scList)
+	if err != nil {
+		return "", err
+	}
+	if len(scList.Items) == 0 {
+		return "", fmt.Errorf("could not find storage class in the cluster")
+	}
+
+	for _, sc := range scList.Items {
+		if sc.Provisioner == "kubernetes.io/no-provisioner" {
+			continue
+		}
+		if sc.ObjectMeta.GetAnnotations()["storageclass.kubernetes.io/is-default-class"] == "true" {
+			defaultSC = append(defaultSC, sc.GetName())
+			continue
+		}
+		nonDefaultSC = append(nonDefaultSC, sc.GetName())
+	}
+
+	if len(defaultSC) != 0 {
+		log.Info("StorageClass configuration", "Name", defaultSC[0])
+		return defaultSC[0], nil
+	}
+
+	if len(nonDefaultSC) != 0 {
+		log.Info("StorageClass configuration", "Name", nonDefaultSC[0])
+		return nonDefaultSC[0], nil
+	}
+
+	return "", fmt.Errorf("could not find dynamic provisioner storage class in the cluster")
+}
+
+func (r *ReconcileIBMLicensingHub) reconcileResourceExistence(
+	instance *operatorv1alpha1.IBMLicensingHub, expectedRes ResourceObject, foundRes runtime.Object) (reconcile.Result, error) {
+
+	resType := reflect.TypeOf(expectedRes)
+	reqLogger := log.WithValues(resType.String(), "Entry", "instance.GetName()", instance.GetName())
+
+	namespacedName := types.NamespacedName{Name: expectedRes.GetName(), Namespace: expectedRes.GetNamespace()}
+	// expectedRes already set before and passed via parameter
+	err := controllerutil.SetControllerReference(instance, expectedRes, r.scheme)
+	if err != nil {
+		reqLogger.Error(err, "Failed to define expected resource")
+		return reconcile.Result{}, err
+	}
+
+	// foundRes already initialized before and passed via parameter
+	err = r.client.Get(context.TODO(), namespacedName, foundRes)
+	if err != nil && errors.IsNotFound(err) {
+		reqLogger.Info(resType.String()+" does not exist, trying creating new one", "Name", expectedRes.GetName(),
+			"Namespace", expectedRes.GetNamespace())
+		err = r.client.Create(context.TODO(), expectedRes)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new "+resType.String(), "Name", expectedRes.GetName(),
+				"Namespace", expectedRes.GetNamespace())
+			return reconcile.Result{}, err
+		}
+		// Created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get "+resType.String(), "Name", expectedRes.GetName(),
+			"Namespace", expectedRes.GetNamespace())
+		return reconcile.Result{}, err
+	} else {
+		reqLogger.Info(resType.String() + " is correct!")
+	}
+	return reconcile.Result{}, nil
+}
+
+func setDefaults(instance *operatorv1alpha1.IBMLicensingHub) {
+	if instance.Spec.DatabaseContainer.Image == "" {
+		instance.Spec.DatabaseContainer.Image = res.DefaultDatabaseImage
+	}
+
+	if instance.Spec.ReceiverContainer.Image == "" {
+		instance.Spec.ReceiverContainer.Image = res.DefaultReceiverImage
+	}
+
+	if instance.Spec.Capacity == "" {
+		instance.Spec.Capacity = "1Gi"
+	}
+
+	if instance.Spec.APISecretToken == "" {
+		instance.Spec.APISecretToken = "ibm-licensing-hub-token"
 	}
 }
