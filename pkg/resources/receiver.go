@@ -60,10 +60,11 @@ func getReceiverProbeHandler() corev1.Handler {
 	}
 }
 
-func GetReceiverContainer(spec operatorv1alpha1.IBMLicensingHubSpec) corev1.Container {
+func GetReceiverContainer(spec operatorv1alpha1.IBMLicensingHubSpec, instance *operatorv1alpha1.IBMLicensingHub) corev1.Container {
 	container := getContainerBase(spec.ReceiverContainer)
 	container.ImagePullPolicy = corev1.PullAlways
 	container.Env = getReceiverEnvironmentVariables()
+	container.Resources = instance.Spec.ReceiverContainer.Resources
 	container.VolumeMounts = getLicensingHubVolumeMounts()
 	container.Name = ReceiverContainerName
 	container.Ports = []corev1.ContainerPort{

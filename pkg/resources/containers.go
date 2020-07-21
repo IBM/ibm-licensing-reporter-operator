@@ -19,7 +19,6 @@ package resources
 import (
 	operatorv1alpha1 "github.com/ibm/ibm-licensing-hub-operator/pkg/apis/operator/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func getSecurityContext() *corev1.SecurityContext {
@@ -58,18 +57,9 @@ func getLivenessProbe(probeHandler corev1.Handler) *corev1.Probe {
 }
 
 func getContainerBase(container operatorv1alpha1.Container) corev1.Container {
-
 	return corev1.Container{
 		Image:           container.Image,
 		ImagePullPolicy: corev1.PullAlways,
-		Resources: corev1.ResourceRequirements{
-			Limits: map[corev1.ResourceName]resource.Quantity{
-				corev1.ResourceCPU:    *cpu500m,
-				corev1.ResourceMemory: *memory512Mi},
-			Requests: map[corev1.ResourceName]resource.Quantity{
-				corev1.ResourceCPU:    *cpu200m,
-				corev1.ResourceMemory: *memory256Mi},
-		},
 		SecurityContext: getSecurityContext(),
 	}
 }

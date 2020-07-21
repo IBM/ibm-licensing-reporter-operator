@@ -20,8 +20,6 @@ import (
 	"math/rand"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
 	operatorv1alpha1 "github.com/ibm/ibm-licensing-hub-operator/pkg/apis/operator/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -64,11 +62,6 @@ const randStringCharsetLength = len(randStringCharset)
 
 var defaultSecretMode int32 = 420
 var seconds60 int64 = 60
-
-var cpu200m = resource.NewMilliQuantity(200, resource.DecimalSI)
-var memory256Mi = resource.NewQuantity(256*1024*1024, resource.BinarySI)
-var cpu500m = resource.NewMilliQuantity(500, resource.DecimalSI)
-var memory512Mi = resource.NewQuantity(512*1024*1024, resource.BinarySI)
 
 func RandString(length int) string {
 	randFunc := rand.New(rand.NewSource(time.Now().UnixNano()))

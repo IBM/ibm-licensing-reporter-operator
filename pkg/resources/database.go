@@ -88,9 +88,10 @@ func getDatabaseProbeHandler() corev1.Handler {
 	}
 }
 
-func GetDatabaseContainer(spec operatorv1alpha1.IBMLicensingHubSpec) corev1.Container {
+func GetDatabaseContainer(spec operatorv1alpha1.IBMLicensingHubSpec, instance *operatorv1alpha1.IBMLicensingHub) corev1.Container {
 	container := getContainerBase(spec.DatabaseContainer)
 	container.Env = getDatabaseEnvironmentVariables()
+	container.Resources = instance.Spec.DatabaseContainer.Resources
 	container.VolumeMounts = getLicensingHubDatabaseVolumeMounts()
 	container.Name = DatabaseContainerName
 	container.LivenessProbe = getLivenessProbe(getDatabaseProbeHandler())
