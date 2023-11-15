@@ -825,7 +825,7 @@ spec:
                   qosClass:
                     description: 'The Quality of Service (QOS) classification assigned
                       to the pod based on resource requirements See PodQOSClass type
-                      for available QOS classes More info: https://git.k8s.io/community/contributors/design-proposals/node/resource-qos.md'
+                      for available QOS classes More info: https://github.com/kubernetes/design-proposals-archive/blob/main/node/resource-qos.md'
                     type: string
                   reason:
                     description: A brief CamelCase message indicating details about
